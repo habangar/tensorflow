@@ -59,9 +59,9 @@ pool2_height = 2
 pool3_width = 2
 pool3_height = 2
 
-conv1_output_channels = 16
-conv2_output_channels = 32
-conv3_output_channels = 64
+conv1_output_channels = 32
+conv2_output_channels = 64
+conv3_output_channels = 128
 
 fc1_depth = 256
 
