@@ -41,29 +41,11 @@ PIXEL_DEPTH = 255
 NUM_LABELS = 10
 VALIDATION_SIZE = 5000  # Size of the validation set.
 SEED = 66478  # Set to None for random seed.
-BATCH_SIZE = 100
+BATCH_SIZE = 64
 NUM_EPOCHS = 10
-EVAL_BATCH_SIZE = 100
+EVAL_BATCH_SIZE = 64
 EVAL_FREQUENCY = 100  # Number of steps between evaluations.
 
-conv1_patch_size = 5
-conv2_patch_size = 5
-# conv3_patch_size = 5
-
-pool1_width = 2
-pool1_height = 2
-
-pool2_width = 2
-pool2_height = 2
-
-# pool3_width = 2
-# pool3_height = 2
-
-conv1_output_channels = 32
-conv2_output_channels = 64
-# conv3_output_channels = 128
-
-fc1_depth = 256
 
 tf.app.flags.DEFINE_boolean("self_test", False, "True if running a self test.")
 FLAGS = tf.app.flags.FLAGS
@@ -170,16 +152,24 @@ def main(argv=None):  # pylint: disable=unused-argument
   # The variables below hold all the trainable weights. They are passed an
   # initial value which will be assigned when we call:
   # {tf.initialize_all_variables().run()}
-  fc_height = (IMAGE_SIZE // (pool1_height + pool2_height )) * (
-      IMAGE_SIZE // (pool1_width * pool2_width)) * conv2_output_channels
+  conv1_weights = tf.Variable(
+      tf.truncated_normal([5, 5, NUM_CHANNELS, 32],  # 5x5 filter, depth 32.
+                          stddev=0.1,
+                          seed=SEED))
+  conv1_biases = tf.Variable(tf.zeros([32]))
+  conv2_weights = tf.Variable(
+      tf.truncated_normal([5, 5, 32, 64],
+                          stddev=0.1,
+                          seed=SEED))
+  conv2_biases = tf.Variable(tf.constant(0.1, shape=[64]))
   fc1_weights = tf.Variable(  # fully connected, depth 512.
       tf.truncated_normal(
-          [fc_height, fc1_depth],
+          [IMAGE_SIZE // 4 * IMAGE_SIZE // 4 * 64, 512],
           stddev=0.1,
           seed=SEED))
-  fc1_biases = tf.Variable(tf.constant(0.1, shape=[fc1_depth]))
+  fc1_biases = tf.Variable(tf.constant(0.1, shape=[512]))
   fc2_weights = tf.Variable(
-      tf.truncated_normal([fc1_depth, NUM_LABELS],
+      tf.truncated_normal([512, NUM_LABELS],
                           stddev=0.1,
                           seed=SEED))
   fc2_biases = tf.Variable(tf.constant(0.1, shape=[NUM_LABELS]))
@@ -191,90 +181,40 @@ def main(argv=None):  # pylint: disable=unused-argument
     # 2D convolution, with 'SAME' padding (i.e. the output feature map has
     # the same size as the input). Note that {strides} is a 4D array whose
     # shape matches the data layout: [image index, y, x, depth].
-    print("data.shape", data.get_shape())
-    print("### conv1")
-    conv1_weights = tf.Variable(
-        tf.truncated_normal([conv1_patch_size, conv1_patch_size, NUM_CHANNELS, conv1_output_channels],
-                            stddev=0.1,
-                            seed=SEED))
-    print("conv1_weights.shape", conv1_weights.get_shape())
-    conv1_biases = tf.Variable(tf.zeros([conv1_output_channels]))
-    conv1 = tf.nn.conv2d(data,
+    conv = tf.nn.conv2d(data,
                         conv1_weights,
                         strides=[1, 1, 1, 1],
                         padding='SAME')
     # Bias and rectified linear non-linearity.
-    print("conv1.shape", conv1.get_shape())
-    relu1 = tf.nn.relu(tf.nn.bias_add(conv1, conv1_biases))
-    print("relu1.shape", relu1.get_shape())
+    relu = tf.nn.relu(tf.nn.bias_add(conv, conv1_biases))
     # Max pooling. The kernel size spec {ksize} also follows the layout of
     # the data. Here we have a pooling window of 2, and a stride of 2.
-    pool1 = tf.nn.max_pool(relu1,
-                          ksize=[1, pool1_height, pool1_width, 1],
-                          strides=[1, pool1_height, pool1_width, 1],
+    pool = tf.nn.max_pool(relu,
+                          ksize=[1, 2, 2, 1],
+                          strides=[1, 2, 2, 1],
                           padding='SAME')
-    print("pool1.shape", pool1.get_shape())
-    ###
-    print("### conv2")
-    conv2_weights = tf.Variable(
-        tf.truncated_normal([conv2_patch_size, conv2_patch_size, conv1_output_channels, conv2_output_channels],
-                            stddev=0.1,
-                            seed=SEED))
-    print("conv2_weights.shape", conv2_weights.get_shape())
-    conv2_biases = tf.Variable(tf.constant(0.1, shape=[conv2_output_channels]))
-    conv2 = tf.nn.conv2d(pool1,
+    conv = tf.nn.conv2d(pool,
                         conv2_weights,
                         strides=[1, 1, 1, 1],
                         padding='SAME')
-    print("conv2.shape", conv2.get_shape())
-    relu2 = tf.nn.relu(tf.nn.bias_add(conv2, conv2_biases))
-    print("relu2.shape", relu2.get_shape())
-    pool2 = tf.nn.max_pool(relu2,
-                          ksize=[1, pool2_height, pool2_width, 1],
-                          strides=[1, pool2_height, pool2_width, 1],
+    relu = tf.nn.relu(tf.nn.bias_add(conv, conv2_biases))
+    pool = tf.nn.max_pool(relu,
+                          ksize=[1, 2, 2, 1],
+                          strides=[1, 2, 2, 1],
                           padding='SAME')
-    print("pool2.shape", pool2.get_shape())
-    ###
-    print("### conv3")
-    # conv3_weights = tf.Variable(
-    #     tf.truncated_normal([conv3_patch_size, conv3_patch_size, conv2_output_channels, conv3_output_channels],
-    #                         stddev=0.1,
-    #                         seed=SEED))
-    # print("conv3_weights.shape", conv3_weights.get_shape())
-    # conv3_biases = tf.Variable(tf.constant(0.1, shape=[conv3_output_channels]))
-    # conv3 = tf.nn.conv2d(pool2,
-    #                     conv3_weights,
-    #                     strides=[1, 1, 1, 1],
-    #                     padding='SAME')
-    # print("conv3.shape", conv3.get_shape())
-    # relu3 = tf.nn.relu(tf.nn.bias_add(conv3, conv3_biases))
-    # print("relu3.shape", relu3.get_shape())
-    # pool3 = tf.nn.max_pool(relu3,
-    #                       ksize=[1, pool3_height, pool3_width, 1],
-    #                       strides=[1, pool3_height, pool3_width, 1],
-    #                       padding='SAME')
-    # print("pool3.shape", pool3.get_shape())
-    ###
     # Reshape the feature map cuboid into a 2D matrix to feed it to the
     # fully connected layers.
-    print("### reshape")
-    pool2_shape = pool2.get_shape().as_list()
+    pool_shape = pool.get_shape().as_list()
     reshape = tf.reshape(
-        pool2,
-        [pool2_shape[0], pool2_shape[1] * pool2_shape[2] * pool2_shape[3]])
-    print("reshape.shape", reshape.get_shape())
-    print("### Fully connected layer")
+        pool,
+        [pool_shape[0], pool_shape[1] * pool_shape[2] * pool_shape[3]])
     # Fully connected layer. Note that the '+' operation automatically
     # broadcasts the biases.
-    # fc1
-    print("fc_height", fc_height)
     hidden = tf.nn.relu(tf.matmul(reshape, fc1_weights) + fc1_biases)
-    print("hidden.shape", hidden.get_shape())
     # Add a 50% dropout during training only. Dropout also scales
     # activations such that no rescaling is needed at evaluation time.
     if train:
       hidden = tf.nn.dropout(hidden, 0.5, seed=SEED)
-    # fc2
     return tf.matmul(hidden, fc2_weights) + fc2_biases
 
   # Training computation: logits + cross-entropy loss.
