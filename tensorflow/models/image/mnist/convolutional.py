@@ -46,6 +46,24 @@ NUM_EPOCHS = 10
 EVAL_BATCH_SIZE = 100
 EVAL_FREQUENCY = 100  # Number of steps between evaluations.
 
+conv1_patch_size = 5
+conv2_patch_size = 5
+conv3_patch_size = 5
+
+pool1_width = 2
+pool1_height = 2
+
+pool2_width = 2
+pool2_height = 2
+
+pool3_width = 2
+pool3_height = 2
+
+conv1_output_channels = 16
+conv2_output_channels = 32
+conv3_output_channels = 64
+
+fc1_depth = 256
 
 tf.app.flags.DEFINE_boolean("self_test", False, "True if running a self test.")
 FLAGS = tf.app.flags.FLAGS
@@ -152,38 +170,16 @@ def main(argv=None):  # pylint: disable=unused-argument
   # The variables below hold all the trainable weights. They are passed an
   # initial value which will be assigned when we call:
   # {tf.initialize_all_variables().run()}
-  # conv1 1 -> 32
-  patch_size = 3
-  conv1_weights = tf.Variable(
-      tf.truncated_normal([patch_size, patch_size, NUM_CHANNELS, 16],  # 5x5 filter, depth 32.
-                          stddev=0.1,
-                          seed=SEED))
-  conv1_biases = tf.Variable(tf.zeros([16]))
-  # conv2 32 -> 64
-  conv2_weights = tf.Variable(
-      tf.truncated_normal([patch_size, patch_size, 16, 32],
-                          stddev=0.1,
-                          seed=SEED))
-  conv2_biases = tf.Variable(tf.constant(0.1, shape=[32]))
-  # conv3 32 -> 64
-  conv3_weights = tf.Variable(
-      tf.truncated_normal([patch_size, patch_size, 32, 64],
-                          stddev=0.1,
-                          seed=SEED))
-  conv3_biases = tf.Variable(tf.constant(0.1, shape=[64]))
-  # fc1
-  pool_width = 2
-  pool_height = 2
-  fc_height = (IMAGE_SIZE // (pool_height*3)) * (IMAGE_SIZE // (pool_width*3)) * 64
+  fc_height = (IMAGE_SIZE // (pool1_height + pool2_height + pool3_height)) * (
+      IMAGE_SIZE // (pool1_width * pool2_width + pool3_width)) * conv3_output_channels
   fc1_weights = tf.Variable(  # fully connected, depth 512.
       tf.truncated_normal(
-          [fc_height, 512],
+          [fc_height, fc1_depth],
           stddev=0.1,
           seed=SEED))
-  fc1_biases = tf.Variable(tf.constant(0.1, shape=[512]))
-  # fc2
+  fc1_biases = tf.Variable(tf.constant(0.1, shape=[fc1_depth]))
   fc2_weights = tf.Variable(
-      tf.truncated_normal([512, NUM_LABELS],
+      tf.truncated_normal([fc1_depth, NUM_LABELS],
                           stddev=0.1,
                           seed=SEED))
   fc2_biases = tf.Variable(tf.constant(0.1, shape=[NUM_LABELS]))
@@ -197,6 +193,12 @@ def main(argv=None):  # pylint: disable=unused-argument
     # shape matches the data layout: [image index, y, x, depth].
     print("data.shape", data.get_shape())
     print("### conv1")
+    conv1_weights = tf.Variable(
+        tf.truncated_normal([conv1_patch_size, conv1_patch_size, NUM_CHANNELS, conv1_output_channels],
+                            stddev=0.1,
+                            seed=SEED))
+    print("conv1_weights.shape", conv1_weights.get_shape())
+    conv1_biases = tf.Variable(tf.zeros([conv1_output_channels]))
     conv1 = tf.nn.conv2d(data,
                         conv1_weights,
                         strides=[1, 1, 1, 1],
@@ -208,12 +210,18 @@ def main(argv=None):  # pylint: disable=unused-argument
     # Max pooling. The kernel size spec {ksize} also follows the layout of
     # the data. Here we have a pooling window of 2, and a stride of 2.
     pool1 = tf.nn.max_pool(relu1,
-                          ksize=[1, pool_height, pool_width, 1],
-                          strides=[1, pool_height, pool_width, 1],
+                          ksize=[1, pool1_height, pool1_width, 1],
+                          strides=[1, pool1_height, pool1_width, 1],
                           padding='SAME')
     print("pool1.shape", pool1.get_shape())
     ###
     print("### conv2")
+    conv2_weights = tf.Variable(
+        tf.truncated_normal([conv2_patch_size, conv2_patch_size, conv1_output_channels, conv2_output_channels],
+                            stddev=0.1,
+                            seed=SEED))
+    print("conv2_weights.shape", conv2_weights.get_shape())
+    conv2_biases = tf.Variable(tf.constant(0.1, shape=[conv2_output_channels]))
     conv2 = tf.nn.conv2d(pool1,
                         conv2_weights,
                         strides=[1, 1, 1, 1],
@@ -222,12 +230,18 @@ def main(argv=None):  # pylint: disable=unused-argument
     relu2 = tf.nn.relu(tf.nn.bias_add(conv2, conv2_biases))
     print("relu2.shape", relu2.get_shape())
     pool2 = tf.nn.max_pool(relu2,
-                          ksize=[1, pool_height, pool_width, 1],
-                          strides=[1, pool_height, pool_width, 1],
+                          ksize=[1, pool2_height, pool2_width, 1],
+                          strides=[1, pool2_height, pool2_width, 1],
                           padding='SAME')
     print("pool2.shape", pool2.get_shape())
     ###
     print("### conv3")
+    conv3_weights = tf.Variable(
+        tf.truncated_normal([conv3_patch_size, conv3_patch_size, conv2_output_channels, conv3_output_channels],
+                            stddev=0.1,
+                            seed=SEED))
+    print("conv3_weights.shape", conv3_weights.get_shape())
+    conv3_biases = tf.Variable(tf.constant(0.1, shape=[conv3_output_channels]))
     conv3 = tf.nn.conv2d(pool2,
                         conv3_weights,
                         strides=[1, 1, 1, 1],
@@ -236,8 +250,8 @@ def main(argv=None):  # pylint: disable=unused-argument
     relu3 = tf.nn.relu(tf.nn.bias_add(conv3, conv3_biases))
     print("relu3.shape", relu3.get_shape())
     pool3 = tf.nn.max_pool(relu3,
-                          ksize=[1, pool_height, pool_width, 1],
-                          strides=[1, pool_height, pool_width, 1],
+                          ksize=[1, pool3_height, pool3_width, 1],
+                          strides=[1, pool3_height, pool3_width, 1],
                           padding='SAME')
     print("pool3.shape", pool3.get_shape())
     ###
@@ -252,12 +266,15 @@ def main(argv=None):  # pylint: disable=unused-argument
     print("### Fully connected layer")
     # Fully connected layer. Note that the '+' operation automatically
     # broadcasts the biases.
+    # fc1
+    print("fc_height", fc_height)
     hidden = tf.nn.relu(tf.matmul(reshape, fc1_weights) + fc1_biases)
     print("hidden.shape", hidden.get_shape())
     # Add a 50% dropout during training only. Dropout also scales
     # activations such that no rescaling is needed at evaluation time.
     if train:
       hidden = tf.nn.dropout(hidden, 0.5, seed=SEED)
+    # fc2
     return tf.matmul(hidden, fc2_weights) + fc2_biases
 
   # Training computation: logits + cross-entropy loss.
